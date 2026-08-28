@@ -1,0 +1,53 @@
+/* Placeholder styling only. It reads the HOST's theme tokens where they exist and
+   falls back to its own, so a standalone load is still legible — the host tokens
+   live on `.app-shell`, which a URL-loaded copy of this app never sits inside. */
+:root {
+  color-scheme: light dark;
+}
+
+.ph {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  height: 100%;
+  font-family: var(--font-sans, 'Geist', ui-sans-serif, system-ui, sans-serif);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-1, #e6e8ec);
+  background: var(--bg-0, #0b0c0f);
+}
+
+.ph-hd {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ph-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.ph-region,
+.ph-item code {
+  font-family: var(--font-mono, 'Geist Mono', ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--text-3, #6a6f78);
+}
+
+.ph-detail {
+  margin: 0;
+  max-width: 60ch;
+  color: var(--text-2, #9ba1ab);
+}
+
+.ph-item {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-3, #6a6f78);
+}
