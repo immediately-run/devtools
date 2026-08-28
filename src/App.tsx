@@ -10,16 +10,17 @@
 // one-repo-many-bindings.
 //
 // The two halves are two FRAMES: the host mounts each region in its own sandboxed
-// iframe, so they share no memory. The panel (R3-390) is complete on its own — a row
-// click opens the file in the editor across activities. The runner (R3-391) is still
-// the placeholder; how it learns the panel's selection is that item's open question.
-import { useEffect, useState } from 'react';
+// iframe, so they share no memory. They keep one session in step over their single
+// IPC edge to each other (`hooks/useSiblingSync.ts`, protocol in `lib/sync.ts`).
+import { useEffect, useMemo } from 'react';
 import { useDiagnostics, useHostTheme, useRegion, onVcsStateChange } from '@immediately-run/sdk';
 import Placeholder from './components/Placeholder';
 import ProblemsPanel from './components/ProblemsPanel';
-import { hostPorts, openDiagnostic, resolveWorkingTree } from './lib/host';
+import RunnerPane from './components/RunnerPane';
+import { openDiagnostic, siblingPorts, stalenessPorts } from './lib/host';
 import type { Diagnostic } from './lib/diagnostics';
-import type { RunPorts } from './lib/run';
+import { useToolsSession } from './hooks/useToolsSession';
+import { useWorkingTree } from './hooks/useWorkingTree';
 import './index.css';
 
 /** The host's theme reaches this frame over the SDK channel, not as CSS — mirror it
@@ -51,40 +52,38 @@ const awaitHost = (): Promise<void> =>
     setTimeout(finish, 1500);
   });
 
-function ProblemsHalf() {
+const onOpen = (d: Diagnostic) => openDiagnostic(d, { reveal: true });
+
+/** Everything both halves share: the working tree, the staleness legs, the sibling
+ *  edge, and the session over them. The panel does the one automatic first-open run
+ *  (§7.1); the runner asks the panel for the current state instead. */
+function useHalf(autoRun: boolean) {
   useMirroredTheme();
+  const tree = useWorkingTree();
+  const staleness = useMemo(() => (tree ? stalenessPorts(tree.mount) : null), [tree]);
+  const sibling = useMemo(() => siblingPorts(), []);
+  const session = useToolsSession({ ports: tree === undefined ? undefined : (tree?.ports ?? null), staleness, sibling, autoRun, awaitHost });
+  const readFile = useMemo(() => (tree ? (path: string) => tree.ports.readFile(path) : null), [tree]);
+  return { session, readFile };
+}
+
+function ProblemsHalf() {
+  const { session } = useHalf(true);
   const { buildErrors } = useDiagnostics();
-  // `undefined` while the edited repo's worktree mount is being resolved (it arrives
-  // after boot); `null` when there is none (standalone, or a host exposing no tree).
-  const [ports, setPorts] = useState<RunPorts | null | undefined>(undefined);
-  useEffect(() => {
-    let cancelled = false;
-    void resolveWorkingTree().then((mount) => {
-      if (!cancelled) setPorts(mount ? hostPorts(mount) : null);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  const onOpen = (d: Diagnostic) => openDiagnostic(d, { reveal: true });
-  return <ProblemsPanel ports={ports} buildErrors={buildErrors} onOpen={onOpen} awaitHost={awaitHost} />;
+  return <ProblemsPanel session={session} buildErrors={buildErrors} onOpen={onOpen} />;
+}
+
+function RunnerHalf() {
+  const { session, readFile } = useHalf(false);
+  const { buildErrors } = useDiagnostics();
+  return <RunnerPane session={session} buildErrors={buildErrors} onOpen={onOpen} readFile={readFile} />;
 }
 
 export default function App() {
   const region = useRegion();
 
   if (region === 'panel.tools') return <ProblemsHalf />;
-
-  if (region === 'mainpane.tools') {
-    return (
-      <Placeholder
-        region="mainpane.tools"
-        title="Tools"
-        detail="The runner lands here — tool tabs, run scope and controls, and the selected diagnostic in source context."
-        item="R3-391"
-      />
-    );
-  }
+  if (region === 'mainpane.tools') return <RunnerHalf />;
 
   // Standalone (no region): loaded from a URL or a dev server rather than bound
   // into the workbench. There is no working-tree mount here and no editor session,
