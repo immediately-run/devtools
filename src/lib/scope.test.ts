@@ -136,3 +136,36 @@ describe('resolveScope — fallback says so, never a silent empty run', () => {
     expect(out.map((f) => f.path)).toEqual(['src/a.ts']);
   });
 });
+
+describe('R3-443 / R3-444 — seeds under skipped directories, and packing past an oversize file', () => {
+  it('drops open/changed seeds under a skipped directory (the transpiled-artifact mirror)', async () => {
+    const t = tree(
+      { 'src/a.ts': 'export {}', '.immediately.run/artifacts/transpiled/src/a.ts.js': 'var x', 'dist/b.js': 'var y' },
+      { open: ['.immediately.run/artifacts/transpiled/src/a.ts.js', 'dist/b.js', 'src/a.ts'] },
+    );
+    const r = await resolveScope('open', t);
+    expect(r.scope).toBe('open');
+    expect(r.files.map((f) => f.path)).toEqual(['src/a.ts']);
+  });
+
+  it('flat: a file over the whole budget is skipped, named, and packing continues', async () => {
+    const t = tree({ 'a.ts': 'x'.repeat(600), 'big.ts': 'x'.repeat(2000), 'c.ts': 'x'.repeat(600) });
+    const { files: out, truncated } = await collectFlat(['a.ts', 'big.ts', 'c.ts'], t, { maxUnits: 1500 });
+    expect(out.map((f) => f.path)).toEqual(['a.ts', 'c.ts']);
+    expect(truncated).toEqual({ dropped: 1, bound: 'size', oversize: ['big.ts'] });
+  });
+
+  it('flat: a file that merely does not fit the remaining budget is counted but not named', async () => {
+    const t = tree({ 'a.ts': 'x'.repeat(600), 'b.ts': 'x'.repeat(600), 'c.ts': 'x'.repeat(600) });
+    const { files: out, truncated } = await collectFlat(['a.ts', 'b.ts', 'c.ts'], t, { maxUnits: 1300 });
+    expect(out.map((f) => f.path)).toEqual(['a.ts', 'b.ts']);
+    expect(truncated).toEqual({ dropped: 1, bound: 'size' });
+  });
+
+  it('closure: an oversize seed is skipped and the remaining seeds (and their imports) still run', async () => {
+    const t = tree({ 'src/big.ts': 'x'.repeat(2000), 'src/a.ts': "import './b';", 'src/b.ts': 'export {}' });
+    const { files: out, truncated } = await collectClosure(['src/big.ts', 'src/a.ts'], t, { maxUnits: 1500 });
+    expect(out.map((f) => f.path)).toEqual(['src/a.ts', 'src/b.ts']);
+    expect(truncated).toEqual({ dropped: 1, bound: 'size', oversize: ['src/big.ts'] });
+  });
+});

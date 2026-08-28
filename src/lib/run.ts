@@ -102,13 +102,20 @@ export async function runTools(
   const failures: ServiceFailure[] = [];
 
   if (resolved.truncated) {
+    const t = resolved.truncated;
+    const why = t.bound === 'files' ? 'the service takes 200 per run' : 'the service takes 1 MB per run';
+    // Name a file that could never fit: "251 not submitted" alone reads as the service's
+    // limit, when the cause is one tracked build artifact (R3-444).
+    const named =
+      t.oversize && t.oversize.length > 0
+        ? t.oversize.length === 1
+          ? ` (${t.oversize[0]} alone is over the budget)`
+          : ` (${t.oversize.length} files are each over the budget)`
+        : '';
     partial.push({
       kind: 'scope-truncated',
-      count: resolved.truncated.dropped,
-      detail:
-        resolved.truncated.bound === 'files'
-          ? `${plural(resolved.truncated.dropped, 'file')} not submitted — the service takes 200 per run`
-          : `${plural(resolved.truncated.dropped, 'file')} not submitted — the service takes 1 MB per run`,
+      count: t.dropped,
+      detail: `${plural(t.dropped, 'file')} not submitted — ${why}${named}`,
     });
   }
 
