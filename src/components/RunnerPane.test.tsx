@@ -3,7 +3,7 @@
 // (a point for others), Open in editor is a fresh gesture, the summary shows when
 // nothing is selected, a stale run is labelled and dimmed (G-TOOL-6), and J/K/F8
 // traverse.
-import { act, render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import RunnerPane from './RunnerPane';
@@ -42,11 +42,13 @@ function ports(): RunPorts {
 function watch() {
   const listeners = new Set<(p: string[]) => void>();
   const staleness: StalenessPorts = { watch: (cb) => (listeners.add(cb), () => listeners.delete(cb)), refreshDiff: async () => {} };
-  return { staleness, write: (p: string[]) => listeners.forEach((l) => l(p)) };
+  return { staleness, write: (p: string[]) => listeners.forEach((l) => l(p)), subscribers: () => listeners.size };
 }
 
-function Harness({ p, staleness, onOpen, autoRun = true }: { p: RunPorts; staleness?: StalenessPorts; onOpen: (d: Diagnostic) => Promise<void> }) {
-  const session = useToolsSession({ ports: p, staleness: staleness ?? null, autoRun });
+function Harness({ p, staleness, onOpen, autoRun = true }: { p: RunPorts; staleness?: StalenessPorts; onOpen: (d: Diagnostic) => Promise<void>; autoRun?: boolean }) {
+  // A 1 ms debounce with REAL timers: the test then simply waits for the label, instead
+  // of racing fake timers against the effect that subscribes after the run commits.
+  const session = useToolsSession({ ports: p, staleness: staleness ?? null, autoRun, staleDebounceMs: 1 });
   return <RunnerPane session={session} buildErrors={[]} onOpen={onOpen} readFile={(path) => p.readFile(path)} />;
 }
 
@@ -119,19 +121,15 @@ describe('RunnerPane', () => {
   });
 
   it('G-TOOL-6 — a write to a covered file marks the run stale: labelled, dimmed, never current', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     const w = watch();
     setup({ staleness: w.staleness });
     await screen.findByText(/✓ ran/);
+    await waitFor(() => expect(w.subscribers()).toBe(1)); // the run committed and the watcher is on
     act(() => w.write(['src/lib.ts']));
-    await act(async () => {
-      vi.advanceTimersByTime(500);
-    });
     expect(await screen.findByText(/out of date/i)).toBeInTheDocument();
     expect(screen.getByText(/◔ stale/)).toBeInTheDocument();
     expect(document.querySelector('.pane')).toHaveClass('pane--stale');
     expect(screen.queryByText(/✓ ran/)).not.toBeInTheDocument();
-    vi.useRealTimers();
   });
 
   it('with no working tree it explains itself and Run is disabled', () => {

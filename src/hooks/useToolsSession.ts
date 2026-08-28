@@ -41,6 +41,8 @@ export interface UseToolsSessionOptions {
   /** Resolves when the host has pushed vcs state, or on a deadline. */
   awaitHost?: () => Promise<void>;
   defaultScope?: ScopeId;
+  /** The staleness debounce (tests shorten it; the default is `STALE_DEBOUNCE_MS`). */
+  staleDebounceMs?: number;
 }
 
 export function useToolsSession({
@@ -50,6 +52,7 @@ export function useToolsSession({
   autoRun = false,
   awaitHost,
   defaultScope = 'changed',
+  staleDebounceMs,
 }: UseToolsSessionOptions): ToolsSession {
   const [status, setStatus] = useState<RunStatus>({ state: 'idle' });
   const [last, setLast] = useState<RunResult | null>(null);
@@ -61,7 +64,7 @@ export function useToolsSession({
   const autoFired = useRef(false);
 
   const covered = useMemo(() => last?.coveredPaths ?? null, [last]);
-  const ownStale = useStaleness(covered, staleness);
+  const ownStale = useStaleness(covered, staleness, staleDebounceMs);
   const stale = useMemo(() => [...new Set([...inheritedStale, ...ownStale])].sort(), [inheritedStale, ownStale]);
 
   const state = useMemo(() => ({ result: last, stale, selectedId }), [last, stale, selectedId]);

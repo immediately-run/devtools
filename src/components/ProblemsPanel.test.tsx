@@ -2,7 +2,7 @@
 // no SDK mock, the ports ARE the seam. What is asserted here is the surface's honesty:
 // the partial treatment, the clean-bill gate, the chips not counting notes, the row
 // click being the (only) thing that asks the host to open, and the stale label.
-import { act, render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { Diagnostic, BuildErrorLike } from '../lib/diagnostics';
@@ -67,7 +67,7 @@ function Harness({
   autoRun?: boolean;
   staleness?: StalenessPorts | null;
 }) {
-  const session = useToolsSession({ ports: p, autoRun, staleness });
+  const session = useToolsSession({ ports: p, autoRun, staleness, staleDebounceMs: 1 });
   return <ProblemsPanel session={session} buildErrors={buildErrors} onOpen={onOpen} />;
 }
 
@@ -176,18 +176,14 @@ describe('ProblemsPanel', () => {
   });
 
   it('G-TOOL-6 — a write to a covered file marks the run stale: labelled, dimmed, and "No problems" withdrawn', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     const listeners = new Set<(p: string[]) => void>();
     const staleness: StalenessPorts = { watch: (cb) => (listeners.add(cb), () => listeners.delete(cb)), refreshDiff: async () => {} };
     setup({}, { staleness });
     expect(await screen.findByText(/no problems/i)).toBeInTheDocument();
+    await waitFor(() => expect(listeners.size).toBe(1)); // the run committed and the watcher is on
     act(() => listeners.forEach((l) => l(['src/lib.ts'])));
-    await act(async () => {
-      vi.advanceTimersByTime(500);
-    });
     expect(await screen.findByText(/out of date/i)).toBeInTheDocument();
     expect(screen.queryByText(/no problems/i)).not.toBeInTheDocument();
-    vi.useRealTimers();
   });
 
   it('a build error alone (no run yet) still shows, live', () => {
