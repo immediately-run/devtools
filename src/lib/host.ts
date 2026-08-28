@@ -3,13 +3,22 @@
 // pipeline is testable with an in-memory tree and no host, and this file stays thin
 // enough to read as a contract.
 
-import { fsAvailable, getEditorContext, getVcsState, invoke, openAppFs } from '@immediately-run/sdk';
+import {
+  type MountFs,
+  type SandboxMount,
+  fsAvailable,
+  getEditorContext,
+  getVcsState,
+  invoke,
+  openFs,
+  waitForMount,
+} from '@immediately-run/sdk';
 import type { Diagnostic } from './diagnostics';
 import { SKIP_DIRS, isSourcePath } from './scope';
 import type { RunPorts } from './run';
 
-/** Is there a working tree to report on? False standalone (`vite dev`, a URL load). */
-export const hasWorkingTree = (): boolean => {
+/** Is there a sandbox filesystem at all? False standalone (`vite dev`, a URL load). */
+export const hasSandboxFs = (): boolean => {
   try {
     return fsAvailable();
   } catch {
@@ -17,11 +26,29 @@ export const hasWorkingTree = (): boolean => {
   }
 };
 
-/** Walk the app's working tree for source files (the `project` scope), skipping the
- *  trees no run should enter. Bounded by the caller through the scope bounds; this
- *  lists, it does not read. */
-async function listSourceFiles(): Promise<string[]> {
-  const fs = openAppFs();
+/**
+ * The tree this panel reports on is the EDITED repo's working tree — NOT this app's
+ * own repository. Both bindings declare `exposesWorkingTree: 'ro'` (TOOLS_ACTIVITY_SPEC
+ * §3.5 / §9), which the host materializes as a mount of `type: 'worktree'` named after
+ * the edited repo; `openAppFs()` would be the devtools repo itself, which is exactly
+ * what this panel first reported on when it was pointed at the wrong tree.
+ *
+ * The mount arrives after boot, so this waits for it (bounded). `null` = there is no
+ * working tree here: standalone, or a host that exposes none to this frame.
+ */
+export async function resolveWorkingTree(timeoutMs = 8000): Promise<SandboxMount | null> {
+  if (!hasSandboxFs()) return null;
+  try {
+    return await waitForMount({ type: 'worktree' }, timeoutMs);
+  } catch {
+    return null;
+  }
+}
+
+/** Walk the working tree for source files (the `project` scope), skipping the trees
+ *  no run should enter. Bounded by the caller through the scope bounds; this lists,
+ *  it does not read. */
+async function listSourceFiles(fs: MountFs): Promise<string[]> {
   const out: string[] = [];
   const walk = async (dir: string): Promise<void> => {
     let entries;
@@ -43,14 +70,14 @@ async function listSourceFiles(): Promise<string[]> {
   return out;
 }
 
-/** The live ports: the app's own working-tree mount + the host's two lists + the gated
+/** The live ports over the working-tree mount + the host's two lists + the gated
  *  catalog `invoke`. `changedPaths` is empty when there is no contribute session (the
  *  channel then never reports anything) — the scope resolver falls back and says so. */
-export function hostPorts(): RunPorts {
-  const fs = openAppFs();
+export function hostPorts(worktree: SandboxMount): RunPorts {
+  const fs = openFs(worktree);
   return {
     readFile: (path) => fs.readFile(path, 'utf8'),
-    listSourceFiles,
+    listSourceFiles: () => listSourceFiles(fs),
     changedPaths: () =>
       getVcsState()
         .changes.filter((c) => c.status !== 'deleted')

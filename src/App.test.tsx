@@ -11,7 +11,8 @@ vi.mock('@immediately-run/sdk', () => ({
   useDiagnostics: () => ({ buildErrors: [], consoleEntries: [], provenance: null }),
   onVcsStateChange: () => () => {},
   fsAvailable: () => false,
-  openAppFs: () => {
+  waitForMount: () => Promise.reject(new Error('no mounts in this test')),
+  openFs: () => {
     throw new Error('no fs in this test');
   },
   getVcsState: () => ({ changes: [], branch: null, prs: [], diffLoading: false }),
@@ -31,10 +32,10 @@ describe('region branching', () => {
     expect(screen.getByRole('button', { name: /run/i })).toBeInTheDocument();
   });
 
-  it('the problems half without a working tree says so instead of running', () => {
+  it('the problems half without a working tree says so instead of running', async () => {
     useRegion.mockReturnValue('panel.tools');
     render(<App />);
-    expect(screen.getByText(/no working tree here/i)).toBeInTheDocument();
+    expect(await screen.findByText(/no working tree here/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /run/i })).toBeDisabled();
   });
 

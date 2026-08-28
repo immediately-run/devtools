@@ -13,12 +13,13 @@
 // iframe, so they share no memory. The panel (R3-390) is complete on its own — a row
 // click opens the file in the editor across activities. The runner (R3-391) is still
 // the placeholder; how it learns the panel's selection is that item's open question.
-import { useEffect, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { useDiagnostics, useHostTheme, useRegion, onVcsStateChange } from '@immediately-run/sdk';
 import Placeholder from './components/Placeholder';
 import ProblemsPanel from './components/ProblemsPanel';
-import { hasWorkingTree, hostPorts, openDiagnostic } from './lib/host';
+import { hostPorts, openDiagnostic, resolveWorkingTree } from './lib/host';
 import type { Diagnostic } from './lib/diagnostics';
+import type { RunPorts } from './lib/run';
 import './index.css';
 
 /** The host's theme reaches this frame over the SDK channel, not as CSS — mirror it
@@ -35,20 +36,36 @@ function useMirroredTheme() {
 const awaitHost = (): Promise<void> =>
   new Promise((resolve) => {
     let done = false;
+    // The channel REPLAYS its current value to a late subscriber synchronously, so the
+    // listener can run before `subscribe` has even returned — `off` must exist first.
+    // (Caught live by this very panel: its first build row was the TDZ error here.)
+    let off: () => void = () => {};
     const finish = () => {
       if (done) return;
       done = true;
       off();
       resolve();
     };
-    const off = onVcsStateChange(() => finish());
+    off = onVcsStateChange(() => finish());
+    if (done) off();
     setTimeout(finish, 1500);
   });
 
 function ProblemsHalf() {
   useMirroredTheme();
   const { buildErrors } = useDiagnostics();
-  const ports = useMemo(() => (hasWorkingTree() ? hostPorts() : null), []);
+  // `undefined` while the edited repo's worktree mount is being resolved (it arrives
+  // after boot); `null` when there is none (standalone, or a host exposing no tree).
+  const [ports, setPorts] = useState<RunPorts | null | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    void resolveWorkingTree().then((mount) => {
+      if (!cancelled) setPorts(mount ? hostPorts(mount) : null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const onOpen = (d: Diagnostic) => openDiagnostic(d, { reveal: true });
   return <ProblemsPanel ports={ports} buildErrors={buildErrors} onOpen={onOpen} awaitHost={awaitHost} />;
 }

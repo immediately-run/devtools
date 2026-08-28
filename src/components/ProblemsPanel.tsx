@@ -18,8 +18,10 @@ import SeverityChips from './SeverityChips';
 import { FilterIcon, PlayIcon } from './Icons';
 
 export interface ProblemsPanelProps {
-  /** `null` = no working tree (standalone); the panel explains itself instead. */
-  ports: RunPorts | null;
+  /** `undefined` = the working tree is still being resolved; `null` = there is none
+   *  (standalone, or a host that exposes no tree to this frame) — the panel explains
+   *  itself instead of running. */
+  ports: RunPorts | null | undefined;
   /** The live `build` rows (the SDK's `useDiagnostics().buildErrors`). */
   buildErrors: readonly BuildErrorLike[];
   /** Row activation — the gesture-carrying call (`openDiagnostic` in the live app). */
@@ -31,7 +33,7 @@ export interface ProblemsPanelProps {
 const NO_BUILD: readonly BuildErrorLike[] = [];
 
 export default function ProblemsPanel({ ports, buildErrors = NO_BUILD, onOpen, autoRun = true, awaitHost }: ProblemsPanelProps) {
-  const { status, last, run, running } = useProblemsRun({ ports, autoRun, awaitHost });
+  const { status, last, run, running } = useProblemsRun({ ports: ports ?? null, autoRun, awaitHost });
   const [filter, setFilter] = useState<SeverityFilter>(DEFAULT_FILTER);
   const [needle, setNeedle] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -74,7 +76,7 @@ export default function ProblemsPanel({ ports, buildErrors = NO_BUILD, onOpen, a
           <h1 className="panel-title" id="problems-title">
             Problems
           </h1>
-          <button type="button" className="runbtn" onClick={() => void run('changed')} disabled={running || ports === null} aria-busy={running}>
+          <button type="button" className="runbtn" onClick={() => void run('changed')} disabled={running || !ports} aria-busy={running}>
             <PlayIcon /> {running ? 'Running…' : 'Run'}
           </button>
         </div>
@@ -85,7 +87,11 @@ export default function ProblemsPanel({ ports, buildErrors = NO_BUILD, onOpen, a
         </label>
       </div>
 
-      {ports === null ? (
+      {ports === undefined ? (
+        <p className="runmeta" role="status">
+          Connecting to the working tree…
+        </p>
+      ) : ports === null ? (
         <p className="empty">
           <b>No working tree here.</b> Open this from the Tools activity inside the immediately.run editor, where it can see the files it reports on.
         </p>
@@ -99,7 +105,7 @@ export default function ProblemsPanel({ ports, buildErrors = NO_BUILD, onOpen, a
         </p>
       )}
 
-      {ports !== null && (
+      {ports && (
         <EmptyState status={status} total={all.length} problems={problems} visibleProblems={visibleProblems} hiddenNotes={!filter.note ? counts.notes : 0} clean={clean} />
       )}
 
