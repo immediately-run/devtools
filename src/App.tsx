@@ -9,29 +9,54 @@
 // `file-explorer` (panel.files + page.commander), which PRINCIPALS_SPEC §4 calls
 // one-repo-many-bindings.
 //
-// Both halves are placeholders until R3-390 (the problems list) and R3-391 (the
-// runner). They exist now because the ladder is otherwise circular: `mergeRegistry`
-// iterates build-defaults, so a region does not exist until site-main says it does,
-// and `immediately.run dev --region` validates only that the string contains a dot
-// — it accepts an unregistered region and serves a page that looks fine and loads
-// nothing. Binding a placeholder first is what makes the next item testable.
-import { useRegion } from '@immediately-run/sdk';
+// The two halves are two FRAMES: the host mounts each region in its own sandboxed
+// iframe, so they share no memory. The panel (R3-390) is complete on its own — a row
+// click opens the file in the editor across activities. The runner (R3-391) is still
+// the placeholder; how it learns the panel's selection is that item's open question.
+import { useEffect, useMemo } from 'react';
+import { useDiagnostics, useHostTheme, useRegion, onVcsStateChange } from '@immediately-run/sdk';
 import Placeholder from './components/Placeholder';
+import ProblemsPanel from './components/ProblemsPanel';
+import { hasWorkingTree, hostPorts, openDiagnostic } from './lib/host';
+import type { Diagnostic } from './lib/diagnostics';
 import './index.css';
+
+/** The host's theme reaches this frame over the SDK channel, not as CSS — mirror it
+ *  onto the root element so the stylesheet's `html[data-theme]` block applies. */
+function useMirroredTheme() {
+  const theme = useHostTheme();
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+}
+
+/** Resolve once the host has pushed vcs state (so the default scope sees the changed
+ *  files), or after a short deadline when there is no contribute session to push. */
+const awaitHost = (): Promise<void> =>
+  new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      off();
+      resolve();
+    };
+    const off = onVcsStateChange(() => finish());
+    setTimeout(finish, 1500);
+  });
+
+function ProblemsHalf() {
+  useMirroredTheme();
+  const { buildErrors } = useDiagnostics();
+  const ports = useMemo(() => (hasWorkingTree() ? hostPorts() : null), []);
+  const onOpen = (d: Diagnostic) => openDiagnostic(d, { reveal: true });
+  return <ProblemsPanel ports={ports} buildErrors={buildErrors} onOpen={onOpen} awaitHost={awaitHost} />;
+}
 
 export default function App() {
   const region = useRegion();
 
-  if (region === 'panel.tools') {
-    return (
-      <Placeholder
-        region="panel.tools"
-        title="Problems"
-        detail="The problems list lands here — tsc, eslint and build diagnostics in one list, grouped by file."
-        item="R3-390"
-      />
-    );
-  }
+  if (region === 'panel.tools') return <ProblemsHalf />;
 
   if (region === 'mainpane.tools') {
     return (

@@ -31,16 +31,45 @@ both do it, and `PRINCIPALS_SPEC` §4 calls it one-repo-many-bindings.
 
 ## State
 
-Both halves are **placeholders**. They exist first because the ladder is otherwise
-circular: the registry is built from build-defaults outward, so a region does not
-exist until the host says it does — and `immediately.run dev --region` validates only
-that the string contains a dot, so it will accept an unregistered region and serve a
-page that looks fine and loads nothing. Binding a placeholder is what makes the real
-work testable.
+The **problems list is built** (`R3-390`); the runner is still a placeholder (`R3-391`).
 
-- `R3-387` — bind the activity and both regions in the host
-- `R3-390` — the problems list
-- `R3-391` — the runner and staleness
+- `R3-387` — bind the activity and both regions in the host — done
+- `R3-390` — the problems list — built
+- `R3-391` — the runner and staleness — next
+
+## How the panel works
+
+```
+src/lib/diagnostics.ts   the unified model: tsc / eslint / build → one Diagnostic,
+                         path normalization, dedup, grouping, counts (notes excluded)
+src/lib/scope.ts         changed files + local import closure (default) · open files ·
+                         whole project — bounded to the service's 200 files / 1 MB,
+                         falling back changed → open → project and SAYING so
+src/lib/run.ts           one run: resolve scope → typecheck + lint → normalize →
+                         `partial` reasons (truncation, relative coverage notes,
+                         service failures); `isCleanBill` is the only door to "No problems"
+src/lib/host.ts          the SDK adapters (working-tree fs, vcs/editor lists, the gated
+                         `invoke`) — the one module that touches the SDK for the run
+src/hooks/useProblemsRun.ts  run state + the single automatic run on first open
+src/components/*         the panel: chips, filter, grouped list, partial banner
+```
+
+Everything above `host.ts` takes ports, so the pipeline and the panel are tested
+against an in-memory tree and canned service replies with no SDK mock.
+
+Two rules a change here must keep:
+
+- **A run with anything unchecked is `partial` and never renders "No problems".**
+  Relative coverage notes (an import the request did not include) count as unchecked
+  — a bare changed file whose imports are all outside the request would otherwise
+  report a clean run having checked almost nothing (`TOOLS_ACTIVITY_SPEC` §3.2, §7.2).
+- **The row click is the gesture.** Opening a diagnostic asks the host to switch the
+  user to the editor activity (`editor:reveal`), which the host only does under a real
+  user activation it reads itself. Never call it on run completion or from a timer;
+  it is denied by design there.
+
+The two regions are two sandboxed frames and share no memory. The panel is complete
+on its own; how the runner learns the panel's selection is `R3-391`'s open question.
 
 ## Developing
 

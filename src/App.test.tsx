@@ -1,11 +1,23 @@
 // R3-386's exit criterion, as a test: ONE entry point renders a DIFFERENT half per
-// region, and the standalone load is not broken. This is the whole deliverable of
-// the bootstrap item — everything else in the repo is scaffolding.
+// region, and the standalone load is not broken. R3-390 fills the panel half in; the
+// SDK is mocked to what a frame outside the workbench reports (no fs, empty channels).
 import { render, screen } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
 const useRegion = vi.fn<() => string | null>();
-vi.mock('@immediately-run/sdk', () => ({ useRegion: () => useRegion() }));
+vi.mock('@immediately-run/sdk', () => ({
+  useRegion: () => useRegion(),
+  useHostTheme: () => 'dark',
+  useDiagnostics: () => ({ buildErrors: [], consoleEntries: [], provenance: null }),
+  onVcsStateChange: () => () => {},
+  fsAvailable: () => false,
+  openAppFs: () => {
+    throw new Error('no fs in this test');
+  },
+  getVcsState: () => ({ changes: [], branch: null, prs: [], diffLoading: false }),
+  getEditorContext: () => ({ dirtyPaths: [], openFiles: [], activeFile: null, viewedFile: null }),
+  invoke: vi.fn(),
+}));
 
 const { default: App } = await import('./App');
 
@@ -16,7 +28,14 @@ describe('region branching', () => {
     useRegion.mockReturnValue('panel.tools');
     render(<App />);
     expect(screen.getByRole('heading', { name: 'Problems' })).toBeInTheDocument();
-    expect(screen.getByText('panel.tools')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /run/i })).toBeInTheDocument();
+  });
+
+  it('the problems half without a working tree says so instead of running', () => {
+    useRegion.mockReturnValue('panel.tools');
+    render(<App />);
+    expect(screen.getByText(/no working tree here/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /run/i })).toBeDisabled();
   });
 
   it('renders the runner half in mainpane.tools', () => {
