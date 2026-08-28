@@ -12,7 +12,7 @@ that contradicts a spec should be able to tell which one is wrong.
 | A relative coverage note makes the run `partial` (`run.ts` → `relative-coverage`); an ASSET import (`.css`, `.svg`, …) is classified `asset` and does not — a refinement this app adds, since no typecheck could ever check it | `TOOLS_ACTIVITY_SPEC` §3.2 (rule); refinement recorded in `TOOLS_ACTIVITY_STATUS` |
 | Dedup after path normalization; "not file-located" group (`diagnostics.ts` `dedupe` / `groupByFile`) | `TOOLS_ACTIVITY_SPEC` §3.3 |
 | Scope fallback changed → open → project, always reported (`scope.ts` `resolveScope`) | `TOOLS_ACTIVITY_SPEC` §7.2 ("the default that would lie") |
-| `openDiagnostic` sends `{ path, selection, reveal }` through the gated `invoke('editor:open')` — the wire the SDK's `openInEditor(path, selection, { reveal })` speaks from 0.56.0 | `TOOLS_ACTIVITY_SPEC` §4, §5.2 |
+| `openDiagnostic` → `openInEditor(path, selection, { reveal: true })` (sdk 0.56.0): one gated `protocol-editor open` carrying the caret target and the cross-activity reveal | `TOOLS_ACTIVITY_SPEC` §4, §5.2 |
 | Navigation to a diagnostic's line | `TOOLS_ACTIVITY_SPEC` §4 |
 | The cross-activity reveal and its gesture gate | `TOOLS_ACTIVITY_SPEC` §5.2 |
 | Run scopes, bounds and `partial` | `TOOLS_ACTIVITY_SPEC` §7.2 |

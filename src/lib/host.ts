@@ -11,6 +11,7 @@ import {
   getVcsState,
   invoke,
   openFs,
+  openInEditor,
   waitForMount,
 } from '@immediately-run/sdk';
 import type { Diagnostic } from './diagnostics';
@@ -99,15 +100,10 @@ export function hostPorts(worktree: SandboxMount): RunPorts {
  * not the user moved (no oracle against the focus gate); the visible "Open in editor"
  * control in the runner is the fallback when it did not.
  *
- * Wire: `{ path, selection, reveal }` on `protocol-editor open` — the same message the
- * SDK's `openInEditor(path, selection, { reveal })` sends from 0.56.0; routed through
- * the gated `invoke` here so the app does not pin an SDK that is still in release.
+ * Wire: `{ path, selection, reveal }` on `protocol-editor open` — `openInEditor` (sdk
+ * 0.56.0) sends `reveal` only as the literal `true`, so an older host sees a plain open.
  */
 export async function openDiagnostic(d: Diagnostic, opts: { reveal: boolean }): Promise<void> {
   if (d.path === null || d.line === null) return;
-  await invoke('editor:open', {
-    path: d.path,
-    selection: { line: d.line, column: d.column ?? 1 },
-    ...(opts.reveal ? { reveal: true } : {}),
-  });
+  await openInEditor(d.path, { line: d.line, column: d.column ?? 1 }, { reveal: opts.reveal });
 }

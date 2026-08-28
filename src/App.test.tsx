@@ -18,6 +18,7 @@ vi.mock('@immediately-run/sdk', () => ({
   getVcsState: () => ({ changes: [], branch: null, prs: [], diffLoading: false }),
   getEditorContext: () => ({ dirtyPaths: [], openFiles: [], activeFile: null, viewedFile: null }),
   invoke: vi.fn(),
+  openInEditor: vi.fn(),
 }));
 
 const { default: App } = await import('./App');
