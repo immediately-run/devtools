@@ -188,3 +188,18 @@ describe('runTools', () => {
     expect(r.diagnostics[0].source).toBe('tsc');
   });
 });
+
+describe('R3-442 — the run records the changed set it ran against', () => {
+  it('snapshots the host changed set, normalized, sorted and deduped', async () => {
+    const r = await runTools(
+      'project',
+      ports({ 'src/a.ts': 'export {}' }, {}, { changed: ['/src/z.ts', 'src/a.ts', 'src/a.ts'] }),
+    );
+    expect(r.changedAtRun).toEqual(['src/a.ts', 'src/z.ts']);
+  });
+
+  it('records an empty baseline for a clean tree — the case that made step 4 fail', async () => {
+    const r = await runTools('project', ports({ 'src/a.ts': 'export {}' }, {}));
+    expect(r.changedAtRun).toEqual([]);
+  });
+});

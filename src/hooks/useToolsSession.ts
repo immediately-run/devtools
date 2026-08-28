@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RunPorts, RunResult } from '../lib/run';
 import { runTools } from '../lib/run';
 import type { ScopeId } from '../lib/scope';
-import { type StalenessPorts, useStaleness } from './useStaleness';
+import { type StalenessPorts, changedSinceRun, useStaleness } from './useStaleness';
 import { type SiblingPorts, useSiblingSync } from './useSiblingSync';
 
 export type RunStatus =
@@ -43,6 +43,10 @@ export interface UseToolsSessionOptions {
   defaultScope?: ScopeId;
   /** The staleness debounce (tests shorten it; the default is `STALE_DEBOUNCE_MS`). */
   staleDebounceMs?: number;
+  /** The host's changed set as it stands NOW (the `vcs` channel, live). Compared with
+   *  the run's own snapshot to re-validate a result this frame did not watch being
+   *  overtaken — an inherited or post-remount one (R3-442). */
+  changedNow?: readonly string[];
 }
 
 export function useToolsSession({
@@ -53,6 +57,7 @@ export function useToolsSession({
   awaitHost,
   defaultScope = 'changed',
   staleDebounceMs,
+  changedNow,
 }: UseToolsSessionOptions): ToolsSession {
   const [status, setStatus] = useState<RunStatus>({ state: 'idle' });
   const [last, setLast] = useState<RunResult | null>(null);
@@ -65,7 +70,16 @@ export function useToolsSession({
 
   const covered = useMemo(() => last?.coveredPaths ?? null, [last]);
   const ownStale = useStaleness(covered, staleness, staleDebounceMs);
-  const stale = useMemo(() => [...new Set([...inheritedStale, ...ownStale])].sort(), [inheritedStale, ownStale]);
+  // Re-validation, not observation: this leg needs no listener to have been alive at
+  // the moment of the write, so it survives the remount every activity switch causes.
+  const revalidated = useMemo(
+    () => changedSinceRun(covered, last?.changedAtRun, changedNow),
+    [covered, last?.changedAtRun, changedNow],
+  );
+  const stale = useMemo(
+    () => [...new Set([...inheritedStale, ...ownStale, ...revalidated])].sort(),
+    [inheritedStale, ownStale, revalidated],
+  );
 
   const state = useMemo(() => ({ result: last, stale, selectedId }), [last, stale, selectedId]);
   const { announceRun, announceSelect } = useSiblingSync({

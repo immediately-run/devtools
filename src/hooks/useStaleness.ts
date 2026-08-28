@@ -23,6 +23,35 @@ export interface StalenessPorts {
 export const STALE_DEBOUNCE_MS = 400;
 
 /**
+ * The second staleness leg (R3-442): covered files the host reports as changed NOW
+ * that were not changed when the run happened. Pure set arithmetic over the two
+ * snapshots, so it holds across a remount — unlike the live write stream below, which
+ * needs a listener to have existed at the moment of the write. On desktop the Tools
+ * frames are UNMOUNTED while the user edits (the editor owns the main pane), so for
+ * the ordinary edit→return path this is the only leg that can fire.
+ *
+ * What it does not catch: a second write to a file that was ALREADY changed before the
+ * run — the host's change list carries a path and a status, not a content hash, so the
+ * two snapshots are identical. The live stream covers that case whenever a frame is
+ * mounted, and a run's own scope re-reads the file regardless.
+ */
+export function changedSinceRun(
+  coveredPaths: readonly string[] | null,
+  changedAtRun: readonly string[] | undefined,
+  changedNow: readonly string[] | undefined,
+): string[] {
+  if (!coveredPaths || coveredPaths.length === 0 || !changedNow || changedNow.length === 0) return [];
+  const covered = new Set(coveredPaths.map(normalizePath));
+  const then = new Set((changedAtRun ?? []).map(normalizePath));
+  const hits = new Set<string>();
+  for (const raw of changedNow) {
+    const p = normalizePath(raw);
+    if (covered.has(p) && !then.has(p)) hits.add(p);
+  }
+  return [...hits].sort();
+}
+
+/**
  * The covered paths written since `coveredPaths` was last set (i.e. since the run).
  * Keyed by the `coveredPaths` identity, so a new run is fresh by definition without a
  * reset — the previous run's hits are simply for another key. Returned paths are

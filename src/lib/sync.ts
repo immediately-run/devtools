@@ -112,6 +112,12 @@ function runResult(v: unknown): RunResult | null {
     durationMs: v.durationMs,
     files: { count: v.files.count, units: v.files.units },
     coveredPaths: (v.coveredPaths as string[]).map(normalizePath),
+    // Tolerated as absent: a sibling running an older build simply reports no
+    // changed-set baseline, and the receiver falls back to the live write stream.
+    changedAtRun:
+      Array.isArray(v.changedAtRun) && v.changedAtRun.length <= MAX_PATHS && v.changedAtRun.every(isStr)
+        ? (v.changedAtRun as string[]).map(normalizePath)
+        : [],
     diagnostics,
     partial,
     failures,

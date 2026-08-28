@@ -13,7 +13,7 @@
 // iframe, so they share no memory. They keep one session in step over their single
 // IPC edge to each other (`hooks/useSiblingSync.ts`, protocol in `lib/sync.ts`).
 import { useEffect, useMemo } from 'react';
-import { useDiagnostics, useHostTheme, useRegion, onVcsStateChange } from '@immediately-run/sdk';
+import { useDiagnostics, useHostTheme, useRegion, onVcsStateChange, useVcsState } from '@immediately-run/sdk';
 import Placeholder from './components/Placeholder';
 import ProblemsPanel from './components/ProblemsPanel';
 import RunnerPane from './components/RunnerPane';
@@ -61,8 +61,15 @@ function useHalf(autoRun: boolean) {
   useMirroredTheme();
   const tree = useWorkingTree();
   const staleness = useMemo(() => (tree ? stalenessPorts(tree.mount) : null), [tree]);
+  // The live changed set, for the re-validation leg (R3-442). A deleted path is not a
+  // write to a covered file in any useful sense — the run's own scope excludes them.
+  const vcs = useVcsState();
+  const changedNow = useMemo(
+    () => vcs.changes.filter((c) => c.status !== 'deleted').map((c) => c.path),
+    [vcs.changes],
+  );
   const sibling = useMemo(() => siblingPorts(), []);
-  const session = useToolsSession({ ports: tree === undefined ? undefined : (tree?.ports ?? null), staleness, sibling, autoRun, awaitHost });
+  const session = useToolsSession({ ports: tree === undefined ? undefined : (tree?.ports ?? null), staleness, sibling, autoRun, awaitHost, changedNow });
   const readFile = useMemo(() => (tree ? (path: string) => tree.ports.readFile(path) : null), [tree]);
   return { session, readFile };
 }
