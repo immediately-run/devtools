@@ -52,15 +52,26 @@ export interface ResolvedScope {
   files: ScopeFile[];
   /** Files known to belong to the scope but not submitted, because a bound was hit.
    *  `null` = complete. A non-null value makes the run `partial` (§7.2). */
-  truncated: { dropped: number; bound: 'files' | 'size' } | null;
+  truncated: {
+    dropped: number;
+    bound: 'files' | 'size';
+    /** Files that alone exceed the whole size budget — the notice names them, because "N not
+     *  submitted" without the reason reads as the service's fault. */
+    oversize?: string[];
+  } | null;
 }
 
 /** Source extensions the services can check. `.d.ts` counts (it types). */
 export const SOURCE_EXT = /\.(m?[jt]sx?|c[jt]s)$/;
-export const isSourcePath = (p: string): boolean => SOURCE_EXT.test(p) && !p.startsWith('node_modules/');
+export const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.git', '.immediately.run', 'coverage', '.cache']);
+/** A path is source only if no segment is a skipped directory. `SKIP_DIRS` used to guard
+ *  the whole-project walk alone, so `open`/`changed` seeds — the editor's file list includes
+ *  the pre-transpiled artifact mirror under `.immediately.run/` — were linted as if written by
+ *  hand (R3-443: 59 generated files, 193 spurious rows). */
+export const isSourcePath = (p: string): boolean =>
+  SOURCE_EXT.test(p) && !p.split('/').some((seg) => SKIP_DIRS.has(seg));
 
 /** Directories no run should walk into for the `project` scope. */
-export const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.git', '.immediately.run', 'coverage', '.cache']);
 
 // ── the import walk ───────────────────────────────────────────────────────────
 
@@ -129,7 +140,7 @@ export async function collectClosure(
 
   const files: ScopeFile[] = [];
   let units = 0;
-  let truncated: ResolvedScope['truncated'] = null;
+  const pack = packer(maxFiles, maxUnits);
   // Resolution cache: a candidate that failed once fails again this run.
   const missing = new Set<string>();
   const read = async (p: string): Promise<string | undefined> => {
@@ -147,13 +158,10 @@ export async function collectClosure(
     const content = await read(path);
     if (content === undefined) continue; // a deleted or unreadable seed — nothing to submit
     if (files.length >= maxFiles) {
-      truncated = { dropped: 1 + queue.length, bound: 'files' };
+      pack.full(1 + queue.length);
       break;
     }
-    if (units + content.length > maxUnits) {
-      truncated = { dropped: 1 + queue.length, bound: 'size' };
-      break;
-    }
+    if (!pack.fits(path, content, units)) continue; // skipped and counted; its imports stay out
     files.push({ path, content });
     units += content.length;
     for (const spec of relativeSpecifiers(content)) {
@@ -167,8 +175,40 @@ export async function collectClosure(
       }
     }
   }
-  return { files, truncated };
+  return { files, truncated: pack.truncated() };
 }
+
+/**
+ * The size bound, shared by both collectors. A file that does not fit is SKIPPED and counted,
+ * and packing continues — it used to end the run, so one tracked 10 MB build artifact, second
+ * in sort order, left 251 of 252 files "not submitted" (R3-444). A file that could never fit
+ * on its own is named, so the notice can say why.
+ */
+const packer = (maxFiles: number, maxUnits: number) => {
+  let dropped = 0;
+  let bound: 'files' | 'size' | null = null;
+  const oversize: string[] = [];
+  return {
+    /** Whether `content` fits beside `units` already packed; records the drop when not. */
+    fits(path: string, content: string, units: number): boolean {
+      if (units + content.length <= maxUnits) return true;
+      dropped++;
+      bound ??= 'size';
+      if (content.length > maxUnits) oversize.push(path);
+      return false;
+    },
+    /** The file cap was hit with `remaining` candidates unread. */
+    full(remaining: number): void {
+      dropped += remaining;
+      bound ??= 'files';
+    },
+    truncated(): ResolvedScope['truncated'] {
+      if (bound === null) return null;
+      return { dropped, bound, ...(oversize.length > 0 ? { oversize } : {}) };
+    },
+    maxFiles,
+  };
+};
 
 /** Submit a flat list (no walk) up to the bounds — the `open` and `project` scopes. */
 export async function collectFlat(
@@ -180,21 +220,25 @@ export async function collectFlat(
   const maxUnits = bounds.maxUnits ?? MAX_TOTAL_UNITS;
   const files: ScopeFile[] = [];
   let units = 0;
+  const pack = packer(maxFiles, maxUnits);
   const unique = [...new Set(paths.map(normalizePath))];
   for (let i = 0; i < unique.length; i++) {
     const path = unique[i];
+    if (files.length >= maxFiles) {
+      pack.full(unique.length - i);
+      break;
+    }
     let content: string;
     try {
       content = await ports.readFile(path);
     } catch {
       continue;
     }
-    if (files.length >= maxFiles) return { files, truncated: { dropped: unique.length - i, bound: 'files' } };
-    if (units + content.length > maxUnits) return { files, truncated: { dropped: unique.length - i, bound: 'size' } };
+    if (!pack.fits(path, content, units)) continue;
     files.push({ path, content });
     units += content.length;
   }
-  return { files, truncated: null };
+  return { files, truncated: pack.truncated() };
 }
 
 /**
