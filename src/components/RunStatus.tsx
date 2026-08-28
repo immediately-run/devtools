@@ -3,7 +3,7 @@
 // named; it is structurally impossible to reach the clean-bill copy from here while
 // `partial` is non-empty, which is the property G-TOOL-5 / G-TOOL-5b ask for.
 import { useEffect, useState } from 'react';
-import type { RunStatus as Status } from '../hooks/useProblemsRun';
+import type { RunStatus as Status } from '../hooks/useToolsSession';
 import { SCOPE_LABEL } from '../lib/scope';
 import { ClockIcon } from './Icons';
 

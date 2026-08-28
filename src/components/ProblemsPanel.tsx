@@ -4,39 +4,36 @@
 // the host's diagnostics channel (§7.1 — it is push-fed and costs nothing, so it is
 // never manual). Everything is normalized to one path form before it is merged.
 //
-// Props are the ports, so a test renders this with an in-memory tree and canned
-// service replies and never mocks the SDK. `App.tsx` supplies the live ones.
+// The run, the selection and the staleness live in the shared `ToolsSession` (R3-391),
+// which the runner in the other frame holds in step over the sibling edge; this
+// component is one view of it. Props are the ports, so a test renders it over an
+// in-memory tree and canned service replies and never mocks the SDK.
 import { useCallback, useMemo, useState } from 'react';
 import { type BuildErrorLike, type Diagnostic, countBySeverity, dedupe, fromBuild, groupByFile, matchesFilter } from '../lib/diagnostics';
-import { type RunPorts, isCleanBill } from '../lib/run';
-import { type RunStatus as Status, useProblemsRun } from '../hooks/useProblemsRun';
+import { isCleanBill } from '../lib/run';
+import { type RunStatus as Status, type ToolsSession } from '../hooks/useToolsSession';
 import { SCOPE_LABEL } from '../lib/scope';
 import { DEFAULT_FILTER, type SeverityFilter } from '../lib/severityFilter';
 import ProblemsList from './ProblemsList';
 import RunStatus from './RunStatus';
 import SeverityChips from './SeverityChips';
+import StaleBanner from './StaleBanner';
 import { FilterIcon, PlayIcon } from './Icons';
 
 export interface ProblemsPanelProps {
-  /** `undefined` = the working tree is still being resolved; `null` = there is none
-   *  (standalone, or a host that exposes no tree to this frame) — the panel explains
-   *  itself instead of running. */
-  ports: RunPorts | null | undefined;
+  session: ToolsSession;
   /** The live `build` rows (the SDK's `useDiagnostics().buildErrors`). */
   buildErrors: readonly BuildErrorLike[];
   /** Row activation — the gesture-carrying call (`openDiagnostic` in the live app). */
   onOpen: (d: Diagnostic) => Promise<void>;
-  autoRun?: boolean;
-  awaitHost?: () => Promise<void>;
 }
 
 const NO_BUILD: readonly BuildErrorLike[] = [];
 
-export default function ProblemsPanel({ ports, buildErrors = NO_BUILD, onOpen, autoRun = true, awaitHost }: ProblemsPanelProps) {
-  const { status, last, run, running } = useProblemsRun({ ports: ports ?? null, autoRun, awaitHost });
+export default function ProblemsPanel({ session, buildErrors = NO_BUILD, onOpen }: ProblemsPanelProps) {
+  const { status, last, run, running, stale, selectedId, select, ports } = session;
   const [filter, setFilter] = useState<SeverityFilter>(DEFAULT_FILTER);
   const [needle, setNeedle] = useState('');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
 
   // The unified list: live build rows + the last run's rows, deduped (§3.3).
@@ -67,7 +64,7 @@ export default function ProblemsPanel({ ports, buildErrors = NO_BUILD, onOpen, a
   const problems = counts.errors + counts.warnings;
   const visibleProblems = visible.filter((d) => d.severity !== 'note').length;
   const liveBuildErrors = all.filter((d) => d.source === 'build').length;
-  const clean = last !== null && status.state === 'done' && isCleanBill(last, liveBuildErrors);
+  const clean = last !== null && status.state === 'done' && isCleanBill(last, liveBuildErrors) && stale.length === 0;
 
   return (
     <section className="problems" aria-labelledby="problems-title">
@@ -99,6 +96,8 @@ export default function ProblemsPanel({ ports, buildErrors = NO_BUILD, onOpen, a
         <RunStatus status={status} />
       )}
 
+      <StaleBanner stale={stale} onRerun={() => void run('changed')} running={running} />
+
       {openError && (
         <p className="partial" role="alert">
           <span>{openError}</span>
@@ -109,7 +108,7 @@ export default function ProblemsPanel({ ports, buildErrors = NO_BUILD, onOpen, a
         <EmptyState status={status} total={all.length} problems={problems} visibleProblems={visibleProblems} hiddenNotes={!filter.note ? counts.notes : 0} clean={clean} />
       )}
 
-      <ProblemsList groups={groups} notes={notes} selectedId={effectiveSelectedId} onSelect={(d) => setSelectedId(d.id)} onOpen={open} />
+      <ProblemsList groups={groups} notes={notes} selectedId={effectiveSelectedId} onSelect={(d) => select(d.id)} onOpen={open} dimmed={stale.length > 0} />
     </section>
   );
 }
@@ -133,7 +132,7 @@ function EmptyState({
   if (status.state === 'running' && total === 0) return null;
   if (status.state === 'done' && clean) {
     // The clean bill of health — reachable ONLY through `isCleanBill`, which refuses
-    // while anything was left unchecked (G-TOOL-5 / 5b).
+    // while anything was left unchecked (G-TOOL-5 / 5b), and never while stale (G-TOOL-6).
     return (
       <p className="empty empty--ok" data-clean="true">
         <b>No problems</b> in {SCOPE_LABEL[status.result.scope].toLowerCase()} — {status.result.files.count} {status.result.files.count === 1 ? 'file' : 'files'} checked.
@@ -141,8 +140,8 @@ function EmptyState({
     );
   }
   if (status.state === 'done' && problems === 0) {
-    // Nothing found, but the run was partial (or a service failed): say what it was,
-    // never "no problems". Hidden notes are named so the list is not silently empty.
+    // Nothing found, but the run was partial, stale, or a service failed: say what it
+    // was, never "no problems". Hidden notes are named so the list is not silently empty.
     return (
       <p className="empty">
         Nothing found in the files that were checked.

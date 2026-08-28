@@ -8,15 +8,22 @@ import {
   type SandboxMount,
   fsAvailable,
   getEditorContext,
+  getRegion,
   getVcsState,
   invoke,
+  onRegionMessage,
   openFs,
   openInEditor,
+  postToRegion,
+  refreshDiff,
   waitForMount,
 } from '@immediately-run/sdk';
 import type { Diagnostic } from './diagnostics';
 import { SKIP_DIRS, isSourcePath } from './scope';
 import type { RunPorts } from './run';
+import type { StalenessPorts } from '../hooks/useStaleness';
+import type { SiblingPorts } from '../hooks/useSiblingSync';
+import { type SyncMessage, siblingOf } from './sync';
 
 /** Is there a sandbox filesystem at all? False standalone (`vite dev`, a URL load). */
 export const hasSandboxFs = (): boolean => {
@@ -107,3 +114,28 @@ export async function openDiagnostic(d: Diagnostic, opts: { reveal: boolean }): 
   if (d.path === null || d.line === null) return;
   await openInEditor(d.path, { line: d.line, column: d.column ?? 1 }, { reveal: opts.reveal });
 }
+
+/** Staleness legs (§7.3): the mount-scoped change stream + the diff refresh. The
+ *  stream is the host's working-tree channel projected to this mount, so it fires only
+ *  for the tree this panel reports on. */
+export function stalenessPorts(worktree: SandboxMount): StalenessPorts {
+  const fs = openFs(worktree);
+  return {
+    watch: (cb) => fs.onChange(cb),
+    refreshDiff: () => refreshDiff(),
+  };
+}
+
+/** The one IPC edge to the other half (R3-391). `null` when this frame is neither
+ *  half (standalone) — the halves then simply work alone. */
+export function siblingPorts(): SiblingPorts | null {
+  const self = getRegion();
+  const sibling = self ? siblingOf(self) : null;
+  if (!self || !sibling) return null;
+  return {
+    self,
+    post: (data: SyncMessage) => postToRegion(sibling, data),
+    onMessage: (cb) => onRegionMessage(cb),
+  };
+}
+
