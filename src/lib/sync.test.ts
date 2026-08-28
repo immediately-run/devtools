@@ -12,6 +12,7 @@ const RESULT: RunResult = {
   durationMs: 250,
   files: { count: 2, units: 90 },
   coveredPaths: ['src/a.ts', '/src/b.ts'],
+  changedAtRun: ['src/a.ts'],
   diagnostics: [
     { id: 'tsc:src/a.ts:2:24:0', source: 'tsc', severity: 'error', path: '/src/a.ts', line: 2, column: 24, endLine: 2, endColumn: 26, code: 'TS2345', message: 'nope' },
     { id: 'build:-:-:-:0', source: 'build', severity: 'error', path: null, line: null, column: null, message: 'ReferenceError' },
@@ -73,5 +74,26 @@ describe('accept', () => {
 
   it('a null run-result clears', () => {
     expect(accept({ from: PANEL_REGION, data: { v: 1, kind: 'run-result', result: null, stale: [] } }, RUNNER_REGION)).toEqual({ v: 1, kind: 'run-result', result: null, stale: [] });
+  });
+});
+
+describe("R3-442 — the run's changed-set baseline crosses the sibling edge", () => {
+  const inbound = (result: unknown) =>
+    accept({ from: PANEL_REGION, data: { v: 1, kind: 'run-result', result, stale: [] } }, RUNNER_REGION);
+  const baselineOf = (m: ReturnType<typeof inbound>) =>
+    m?.kind === 'run-result' ? m.result?.changedAtRun : undefined;
+
+  it('carries and normalizes `changedAtRun`', () => {
+    expect(baselineOf(inbound({ ...RESULT, changedAtRun: ['/src/a.ts', 'src/b.ts'] }))).toEqual(['src/a.ts', 'src/b.ts']);
+  });
+
+  it('tolerates a sibling on an older build that sends no baseline', () => {
+    const older: Record<string, unknown> = { ...RESULT };
+    delete older.changedAtRun;
+    expect(baselineOf(inbound(older))).toEqual([]);
+  });
+
+  it('treats a malformed baseline as absent rather than half-applying it', () => {
+    expect(baselineOf(inbound({ ...RESULT, changedAtRun: ['ok', 42] }))).toEqual([]);
   });
 });

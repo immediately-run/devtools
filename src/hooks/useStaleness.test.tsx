@@ -3,7 +3,7 @@
 // run is fresh by definition.
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { type StalenessPorts, useStaleness } from './useStaleness';
+import { type StalenessPorts, changedSinceRun, useStaleness } from './useStaleness';
 
 function fakeWatch() {
   const listeners = new Set<(paths: string[]) => void>();
@@ -97,5 +97,36 @@ describe('useStaleness', () => {
     const none = renderHook(() => useStaleness(null, w.ports));
     expect(none.result.current).toEqual([]);
     expect(w.listeners.size).toBe(0);
+  });
+});
+
+// R3-442 — the leg that survives a remount. On desktop both Tools frames are unmounted
+// while the user edits, so no watcher exists at the moment of the write; the run is
+// re-validated against the host's changed set instead of observed.
+describe('changedSinceRun', () => {
+  const covered = ['src/a.ts', 'src/b.ts'];
+
+  it('marks a covered file that BECAME changed since the run', () => {
+    expect(changedSinceRun(covered, [], ['/src/b.ts'])).toEqual(['src/b.ts']);
+  });
+
+  it('ignores a file that was ALREADY changed when the run happened', () => {
+    // The run checked it in that state; nothing says it moved since.
+    expect(changedSinceRun(covered, ['src/b.ts'], ['src/b.ts'])).toEqual([]);
+  });
+
+  it('ignores a change outside the run scope', () => {
+    expect(changedSinceRun(covered, [], ['src/elsewhere.ts'])).toEqual([]);
+  });
+
+  it('normalizes both snapshots, so the leading slash never decides the answer', () => {
+    expect(changedSinceRun(['/src/a.ts'], ['/src/a.ts'], ['src/a.ts'])).toEqual([]);
+    expect(changedSinceRun(['src/a.ts'], undefined, ['/src/a.ts'])).toEqual(['src/a.ts']);
+  });
+
+  it('is empty with no run, no changes, or an older sibling that sent no baseline', () => {
+    expect(changedSinceRun(null, [], ['src/a.ts'])).toEqual([]);
+    expect(changedSinceRun(covered, [], [])).toEqual([]);
+    expect(changedSinceRun(covered, undefined, undefined)).toEqual([]);
   });
 });

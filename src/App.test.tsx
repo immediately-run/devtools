@@ -12,6 +12,7 @@ vi.mock('@immediately-run/sdk', () => ({
   useHostTheme: () => 'dark',
   useDiagnostics: () => ({ buildErrors: [], consoleEntries: [], provenance: null }),
   onVcsStateChange: () => () => {},
+  useVcsState: () => ({ changes: [], branch: null, prs: [], diffLoading: false }),
   fsAvailable: () => false,
   waitForMount: () => Promise.reject(new Error('no mounts in this test')),
   openFs: () => {

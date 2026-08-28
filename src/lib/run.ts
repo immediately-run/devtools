@@ -28,6 +28,7 @@ import {
   dedupe,
   fromLint,
   fromTsc,
+  normalizePath,
 } from './diagnostics';
 import { type ResolvedScope, type ScopeId, type ScopePorts, resolveScope } from './scope';
 
@@ -62,6 +63,12 @@ export interface RunResult {
   files: { count: number; units: number };
   /** Repo-relative paths the run covered — what staleness (§7.3) watches. */
   coveredPaths: string[];
+  /** The host's changed set AT run time (R3-442). Staleness has a second leg beside
+   *  the live write stream: a covered file that is changed NOW but was not changed
+   *  then was written since — and that comparison survives a remount, which the live
+   *  stream cannot (on desktop both Tools frames are unmounted while the user edits,
+   *  so no listener exists at the moment of the write). */
+  changedAtRun: string[];
   /** tsc + eslint rows, deduped. `build` rows are live and merged at render time. */
   diagnostics: Diagnostic[];
   /** Empty = complete. Non-empty = `partial`, and never a clean bill of health. */
@@ -98,6 +105,9 @@ export async function runTools(
   const startedAt = now();
   const resolved: ResolvedScope = await resolveScope(requested, ports, bounds);
   const { files } = resolved;
+  // Snapshot the host's changed set with the run, whatever scope ran: the comparison
+  // is about the TREE moving under the result, not about what was submitted.
+  const changedAtRun = [...new Set(ports.changedPaths().map(normalizePath))].sort();
   const partial: PartialReason[] = [];
   const failures: ServiceFailure[] = [];
 
@@ -190,6 +200,7 @@ export async function runTools(
     durationMs: Math.max(0, now() - startedAt),
     files: { count: files.length, units: files.reduce((n, f) => n + f.content.length, 0) },
     coveredPaths: files.map((f) => f.path),
+    changedAtRun,
     diagnostics: dedupe(diagnostics),
     partial,
     failures,
