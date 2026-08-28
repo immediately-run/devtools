@@ -31,13 +31,15 @@ both do it, and `PRINCIPALS_SPEC` §4 calls it one-repo-many-bindings.
 
 ## State
 
-The **problems list is built** (`R3-390`); the runner is still a placeholder (`R3-391`).
+Both halves are **built**: the problems list (`R3-390`) and the runner (`R3-391`).
+The live drill (`R3-392`) is what remains.
 
 - `R3-387` — bind the activity and both regions in the host — done
-- `R3-390` — the problems list — built
-- `R3-391` — the runner and staleness — next
+- `R3-390` — the problems list — done
+- `R3-391` — the runner, staleness, sibling sync, keyboard — built
+- `R3-392` — the live drill — next
 
-## How the panel works
+## How it works
 
 ```
 src/lib/diagnostics.ts   the unified model: tsc / eslint / build → one Diagnostic,
@@ -48,14 +50,37 @@ src/lib/scope.ts         changed files + local import closure (default) · open 
 src/lib/run.ts           one run: resolve scope → typecheck + lint → normalize →
                          `partial` reasons (truncation, relative coverage notes,
                          service failures); `isCleanBill` is the only door to "No problems"
-src/lib/host.ts          the SDK adapters (working-tree fs, vcs/editor lists, the gated
-                         `invoke`) — the one module that touches the SDK for the run
-src/hooks/useProblemsRun.ts  run state + the single automatic run on first open
-src/components/*         the panel: chips, filter, grouped list, partial banner
+src/lib/codeFrame.ts     the read-only code frame rows: hit line + a caret SPAN for tsc
+                         (the one source with an end position), a point for the rest
+src/lib/sync.ts          the sibling protocol (hello / run-result / select) and its
+                         validation — the other frame's payload is data, not trust
+src/lib/host.ts          the SDK adapters (the edited repo's worktree mount, vcs/editor
+                         lists, staleness legs, the IPC edge, openInEditor) — the one
+                         module that touches the SDK for the session
+src/hooks/useToolsSession.ts  ONE session for both halves: run, selection, staleness,
+                         kept in step over the IPC edge (useSiblingSync / useStaleness)
+src/components/ProblemsPanel.tsx  panel.tools — chips, filter, grouped list, banners
+src/components/RunnerPane.tsx     mainpane.tools — tabs, run bar, code frame, actions
 ```
 
-Everything above `host.ts` takes ports, so the pipeline and the panel are tested
-against an in-memory tree and canned service replies with no SDK mock.
+Everything above `host.ts` takes ports, so the pipeline and both halves are tested
+against an in-memory tree, an in-memory bus and canned service replies with no SDK mock.
+
+**The two halves are two frames.** The host mounts each region in its own sandboxed
+iframe; they share no memory. They hold one session in step over their single §5.6
+IPC edge to each other (and to nothing else — the explorer reveal stays a consequence,
+never a message). A half that mounts later sends `hello` and receives the current run
+and selection instead of re-running. The panel does the one automatic first-open run;
+the runner never auto-runs.
+
+**Staleness.** A run records the paths it covered; the worktree mount's change stream →
+debounce → `refreshDiff()` → a write to a covered path marks the run stale. It stays on
+screen, dimmed and labelled, and is never a clean bill.
+
+**Keyboard**, per frame (keys do not cross iframes): the panel's list takes arrows /
+Home / End / Enter; the runner takes J / K and F8 / ⇧F8 (next / previous problem in the
+active tab) and Enter. None collide with the host (⌘K palette, ⌘B panel, ⌘. mode,
+Escape) or the editor (CodeMirror's default keymap).
 
 Two rules a change here must keep:
 
@@ -68,8 +93,8 @@ Two rules a change here must keep:
   user activation it reads itself. Never call it on run completion or from a timer;
   it is denied by design there.
 
-The two regions are two sandboxed frames and share no memory. The panel is complete
-on its own; how the runner learns the panel's selection is `R3-391`'s open question.
+The two regions are two sandboxed frames and share no memory; see "The two halves are
+two frames" above for how they stay in step.
 
 ## Developing
 
