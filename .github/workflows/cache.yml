@@ -8,8 +8,21 @@
 # contribute-manifest sidecar so edits made on immediately.run can still be
 # pushed back to GitHub offline.
 #
-# Pages is auto-provisioned by the `actions/configure-pages` step below
-# (enablement: true), so no manual Settings → Pages step is needed on a fresh repo.
+# Pages must be enabled ONCE, by a human or a user token, before this workflow can
+# publish. The `actions/configure-pages` step below asks for `enablement: true`, but
+# the Actions GITHUB_TOKEN cannot create a Pages site — measured on this repo's very
+# first run, 2026-08-28:
+#
+#   Get Pages site failed.    Error: Not Found
+#   Create Pages site failed. Error: Resource not accessible by integration
+#
+# So `enablement: true` is a no-op on a fresh repo and the run fails. One-time fix,
+# with a token that has `repo` scope:
+#
+#   gh api -X POST repos/<owner>/<repo>/pages -f build_type=workflow
+#
+# (or Settings → Pages → Source: GitHub Actions). The step is kept because it is
+# harmless once Pages exists and it re-asserts the source on later runs.
 
 name: Cache for immediately.run
 
@@ -44,9 +57,9 @@ jobs:
         with:
           node-version: 22
 
-      # Auto-provision GitHub Pages so the deploy job can publish even on a
-      # freshly-created repo. Without this, `deploy-pages` 404s every run until
-      # someone manually flips Settings → Pages → Source: GitHub Actions.
+      # Asserts the Pages source is Actions. It CANNOT create the site — see the
+      # header: the GITHUB_TOKEN lacks that permission, so a fresh repo needs the
+      # one-time `gh api -X POST .../pages` first or this step errors.
       - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
         with:
           enablement: true
