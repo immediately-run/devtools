@@ -14,10 +14,26 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same ref supersedes an in-flight run.
+# A newer push to the same ref supersedes an in-flight run — on a PR branch only. A push
+# run gets its own group (the SHA), so it can never be cancelled by a later merge.
+#
+# This was `group: ci-${{ github.ref }}` with `cancel-in-progress: true`, which cancelled
+# a `main` run the moment the next merge landed: the superseded commit was left with a
+# CANCELLED verdict rather than a green one, which matters as soon as a check is required
+# or somebody bisects `main` by check status. `cancel-in-progress: false` alone would not
+# have fixed it either — GitHub keeps at most one pending run per group, so a third merge
+# inside the window still cancels the middle commit's queued run. Keying push runs by SHA
+# is what removes it. (R3-648 proved this on the three repos that copied this file;
+# R3-653 landed the fix in file-explorer and editor, and this file was the remaining
+# carrier of the old keying in this item's set.)
+#
+# `workflow_dispatch` — the third trigger this workflow declares — takes the non-push arm,
+# so a manual run shares the bare `ci-<ref>` group and is not cancelled in flight.
+# Harmless, and named because it is the one case where the one-pending-run-per-group rule
+# still applies.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.ref }}${{ github.event_name == 'push' && format('-{0}', github.sha) || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -44,14 +60,17 @@ jobs:
       # kept copying. Measured here on this checkout:
       #
       #   $ CI=true npx eslint . --rule '{"max-lines":["warn",1]}'
-      #   37 problems (0 errors, 37 warnings)                      → exit 0
+      #   36 problems (0 errors, 36 warnings)                      → exit 0
       #   $ … --max-warnings 0                                     → exit 1
       #
       # ESLint reads no `CI` variable; Actions already sets `CI=true` in every job, so
       # the block was a no-op; and `cache.yml` — the only other workflow here — runs the
       # cache-zip publish, no lint and no build, so there was no deploy-time gate to
-      # match. No rule is warn-level in this repo today, so nothing was hiding behind
-      # the lax form — what was missing was the ratchet, which the script now carries.
+      # match. Three rules are warn-level here — `react-hooks/exhaustive-deps`,
+      # `react-hooks/incompatible-library`, `react-hooks/unsupported-syntax`, from
+      # `reactHooks.configs.flat.recommended` — so this repo was EXPOSED to the hole the
+      # false comment described, not merely un-ratcheted; it is clean today (exit 0
+      # above), and the script now carries the ratchet that keeps it that way.
       - name: Lint
         run: npm run lint
 
