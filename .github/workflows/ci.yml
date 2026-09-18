@@ -22,10 +22,6 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    env:
-      # ESLint and tooling treat warnings as errors under CI, matching the
-      # deploy-time build gate.
-      CI: true
     steps:
       # Third-party actions are pinned by commit SHA (see cache.yml rationale).
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -38,6 +34,24 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # `npm run lint` is the gate: `--max-warnings 0` lives in the script, so the command
+      # a contributor runs and the command CI runs are the same string (R3-656's one shape;
+      # R3-653 landed it in file-explorer and editor).
+      #
+      # This job carried an `env: CI: true` block and the comment "ESLint and tooling
+      # treat warnings as errors under CI, matching the deploy-time build gate". Both
+      # halves are false — the sentence R3-653 removed in its two repos and this repo
+      # kept copying. Measured here on this checkout:
+      #
+      #   $ CI=true npx eslint . --rule '{"max-lines":["warn",1]}'
+      #   37 problems (0 errors, 37 warnings)                      → exit 0
+      #   $ … --max-warnings 0                                     → exit 1
+      #
+      # ESLint reads no `CI` variable; Actions already sets `CI=true` in every job, so
+      # the block was a no-op; and `cache.yml` — the only other workflow here — runs the
+      # cache-zip publish, no lint and no build, so there was no deploy-time gate to
+      # match. No rule is warn-level in this repo today, so nothing was hiding behind
+      # the lax form — what was missing was the ratchet, which the script now carries.
       - name: Lint
         run: npm run lint
 
