@@ -25,7 +25,9 @@ permissions:
 # inside the window still cancels the middle commit's queued run. Keying push runs by SHA
 # is what removes it. (R3-648 proved this on the three repos that copied this file;
 # R3-653 landed the fix in file-explorer and editor, and this file was the remaining
-# carrier of the old keying in this item's set.)
+# carrier of the old keying's cancel-a-main-run defect in this item's set — `docs`
+# carries the same lines, but its CI never triggers on push, so the defect cannot
+# bite there.)
 #
 # `workflow_dispatch` — the third trigger this workflow declares — takes the non-push arm,
 # so a manual run shares the bare `ci-<ref>` group and is not cancelled in flight.
