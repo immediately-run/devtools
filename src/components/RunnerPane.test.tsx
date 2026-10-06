@@ -132,6 +132,26 @@ describe('RunnerPane', () => {
     expect(screen.queryByText(/✓ ran/)).not.toBeInTheDocument();
   });
 
+  it('R3-960 — a failed service names why: the overview service-error row carries the host message', async () => {
+    const onOpen = vi.fn<(d: Diagnostic) => Promise<void>>().mockResolvedValue(undefined);
+    const failing: RunPorts = {
+      ...ports(),
+      invoke: async <T,>(name: string): Promise<T> => {
+        if (name === 'authoring:typecheck') {
+          throw Object.assign(new Error("Failed to execute 'importScripts' on 'WorkerGlobalScope': Module scripts don't support importScripts()."), { code: 'service-error' });
+        }
+        return { diagnostics: [], truncated: false, total: 0, skipped: [] } as T;
+      },
+    };
+    render(<Harness p={failing} onOpen={onOpen} />);
+    await screen.findByText(/Partial run/);
+    const row = document.querySelector('[data-kind="service-error"]');
+    expect(row).not.toBeNull();
+    expect(row!.textContent).toBe(
+      "typecheck did not run (service-error): Failed to execute 'importScripts' on 'WorkerGlobalScope': Module scripts don't support importScripts().",
+    );
+  });
+
   it('with no working tree it explains itself and Run is disabled', () => {
     function NoTree() {
       const session = useToolsSession({ ports: null });
