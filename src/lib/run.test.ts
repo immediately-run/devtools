@@ -190,6 +190,21 @@ describe('runTools', () => {
     expect(r.failures[0].message).toBe(message);
   });
 
+  it('R3-960 — the cut never splits a surrogate pair (an astral character straddling the bound)', async () => {
+    // 298 ASCII + one astral char puts its high surrogate exactly at the cut; the
+    // whole character goes, never a lone half.
+    const message = `${'x'.repeat(298)}\u{1F600}${'y'.repeat(50)}`;
+    const r = await runTools(
+      'changed',
+      ports(FILES, { typecheckError: Object.assign(new Error(message), { code: 'service-error' }) }, { changed: ['src/use.ts'] }),
+    );
+    const shown = (r.partial[0] as { detail: string }).detail.split(': ', 2)[1];
+    expect(shown.endsWith('…')).toBe(true);
+    // No lone surrogate anywhere in the rendered line.
+    expect(shown).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+    expect([...shown].length).toBeLessThanOrEqual(MAX_FAILURE_TEXT);
+  });
+
   it('R3-960 — a failing lint gets the same treatment', async () => {
     const r = await runTools(
       'changed',

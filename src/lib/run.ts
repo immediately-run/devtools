@@ -107,7 +107,10 @@ export function serviceErrorDetail(label: 'typecheck' | 'lint', code: string, me
   const prefix = `${label} did not run (${code})`;
   const text = message.replace(/\s+/g, ' ').trim();
   if (text === '') return prefix;
-  const bounded = text.length > MAX_FAILURE_TEXT ? `${text.slice(0, MAX_FAILURE_TEXT - 1)}…` : text;
+  // Cut by code POINTS, not UTF-16 units: a unit slice can split a surrogate pair and
+  // render U+FFFD in the banner (review nit, PR #9).
+  const points = [...text];
+  const bounded = points.length > MAX_FAILURE_TEXT ? `${points.slice(0, MAX_FAILURE_TEXT - 1).join('')}…` : text;
   return `${prefix}: ${bounded}`;
 }
 
