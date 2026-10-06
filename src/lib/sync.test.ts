@@ -4,7 +4,7 @@
 // silently (a version skew is not an error to show).
 import { describe, expect, it } from 'vitest';
 import { PANEL_REGION, RUNNER_REGION, accept, siblingOf } from './sync';
-import type { RunResult } from './run';
+import { runTools, type RunResult } from './run';
 
 const RESULT: RunResult = {
   scope: 'changed',
@@ -43,6 +43,27 @@ describe('accept', () => {
     expect(m.result.diagnostics[0]).toMatchObject({ path: 'src/a.ts', endLine: 2, endColumn: 26, code: 'TS2345' });
     expect(m.result.diagnostics[1]).toMatchObject({ path: null, line: null, column: null });
     expect(m.result.partial).toEqual(RESULT.partial);
+  });
+
+  it('R3-960 — a real runTools result for a service failing with a 10,000-char message still accepts', async () => {
+    // The input is the real pipeline's output, not a typed literal: the bounded
+    // service-error detail must never trip the run-result's MAX_TEXT refusal.
+    const result = await runTools('changed', {
+      readFile: async () => 'export {}',
+      listSourceFiles: async () => ['src/a.ts'],
+      changedPaths: () => ['src/a.ts'],
+      openPaths: () => [],
+      invoke: async <T,>(name: string): Promise<T> => {
+        if (name === 'authoring:typecheck') throw Object.assign(new Error('y'.repeat(10_000)), { code: 'service-error' });
+        return { diagnostics: [], truncated: false, total: 0, skipped: [] } as T;
+      },
+    });
+    expect(result.failures[0].message).toHaveLength(10_000);
+    const m = accept({ from: PANEL_REGION, data: { v: 1, kind: 'run-result', result, stale: [] } }, RUNNER_REGION);
+    expect(m?.kind).toBe('run-result');
+    if (m?.kind !== 'run-result' || !m.result) throw new Error('unreachable');
+    expect(m.result.partial[0].kind).toBe('service-error');
+    expect(m.result.partial[0].detail).toContain('service-error');
   });
 
   it('drops anything not from the sibling — the host attaches `from`, so this is the region check', () => {

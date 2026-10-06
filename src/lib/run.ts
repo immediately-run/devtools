@@ -95,6 +95,25 @@ const errCode = (e: unknown): { code: string; message: string } => {
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
+/** The bound on the host's failure message copied into a partial-run line — one home
+ *  (R3-960). `sync.ts` refuses a whole run-result whose `detail` exceeds its own
+ *  MAX_TEXT, so the copy here is bounded well under it. */
+export const MAX_FAILURE_TEXT = 300;
+
+/** The one place the `did not run (<code>)` line is built (R3-960): the host's message
+ *  — the part that says WHY the service failed — rides after the code, collapsed to a
+ *  single line and bounded; an empty message keeps the code-only line. */
+export function serviceErrorDetail(label: 'typecheck' | 'lint', code: string, message: string): string {
+  const prefix = `${label} did not run (${code})`;
+  const text = message.replace(/\s+/g, ' ').trim();
+  if (text === '') return prefix;
+  // Cut by code POINTS, not UTF-16 units: a unit slice can split a surrogate pair and
+  // render U+FFFD in the banner (review nit, PR #9).
+  const points = [...text];
+  const bounded = points.length > MAX_FAILURE_TEXT ? `${points.slice(0, MAX_FAILURE_TEXT - 1).join('')}…` : text;
+  return `${prefix}: ${bounded}`;
+}
+
 /** Resolve the scope, then run both services over it. */
 export async function runTools(
   requested: ScopeId,
@@ -163,7 +182,7 @@ export async function runTools(
     } else {
       const { code, message } = errCode(tsc.reason);
       failures.push({ source: 'tsc', code, message });
-      partial.push({ kind: 'service-error', detail: `typecheck did not run (${code})` });
+      partial.push({ kind: 'service-error', detail: serviceErrorDetail('typecheck', code, message) });
     }
 
     if (lint.status === 'fulfilled') {
@@ -189,7 +208,7 @@ export async function runTools(
     } else {
       const { code, message } = errCode(lint.reason);
       failures.push({ source: 'eslint', code, message });
-      partial.push({ kind: 'service-error', detail: `lint did not run (${code})` });
+      partial.push({ kind: 'service-error', detail: serviceErrorDetail('lint', code, message) });
     }
   }
 

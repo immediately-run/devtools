@@ -3,7 +3,7 @@
 // lint severities; R3-384's `truncated`/`total`/`skipped`) and the partial rules
 // (G-TOOL-5, G-TOOL-5b).
 import { describe, expect, it } from 'vitest';
-import { isCleanBill, runTools, type RunPorts } from './run';
+import { isCleanBill, MAX_FAILURE_TEXT, runTools, type RunPorts } from './run';
 
 const RELATIVE_NOTE = (spec: string) =>
   `'${spec}' was not included in this typecheck request, so its exports are unchecked. This is not an error: include the file to check it.`;
@@ -160,9 +160,60 @@ describe('runTools', () => {
       ports(FILES, { typecheckError: Object.assign(new Error('timeout'), { code: 'service-timeout' }), lint: { diagnostics: [{ path: 'src/lib.ts', line: 1, column: 1, ruleId: 'x', severity: 'error', messageText: 'm' }] } }, { changed: ['src/use.ts'] }),
     );
     expect(r.failures).toEqual([{ source: 'tsc', code: 'service-timeout', message: 'timeout' }]);
-    expect(r.partial).toEqual([expect.objectContaining({ kind: 'service-error', detail: 'typecheck did not run (service-timeout)' })]);
+    expect(r.partial).toEqual([expect.objectContaining({ kind: 'service-error', detail: 'typecheck did not run (service-timeout): timeout' })]);
     expect(r.diagnostics.map((d) => d.source)).toEqual(['eslint']);
     expect(isCleanBill(r, 0)).toBe(false);
+  });
+
+  it('R3-960 — an empty message keeps the code-only line, exactly as before', async () => {
+    const r = await runTools(
+      'changed',
+      ports(FILES, { typecheckError: Object.assign(new Error(''), { code: 'service-error' }) }, { changed: ['src/use.ts'] }),
+    );
+    expect(r.partial).toEqual([expect.objectContaining({ kind: 'service-error', detail: 'typecheck did not run (service-error)' })]);
+  });
+
+  it('R3-960 — a long multi-line message is one bounded line ending in …', async () => {
+    const message = `line one\n${'x'.repeat(1000)}\nline three`;
+    const r = await runTools(
+      'changed',
+      ports(FILES, { typecheckError: Object.assign(new Error(message), { code: 'service-error' }) }, { changed: ['src/use.ts'] }),
+    );
+    const detail = (r.partial[0] as { detail: string }).detail;
+    const prefix = 'typecheck did not run (service-error): ';
+    expect(detail.startsWith(prefix)).toBe(true);
+    const shown = detail.slice(prefix.length);
+    expect(shown).not.toMatch(/\s{2,}|[\n\r\t]/);
+    expect(shown.length).toBeLessThanOrEqual(MAX_FAILURE_TEXT);
+    expect(shown.endsWith('…')).toBe(true);
+    // failures keeps the full message, unbounded by the display copy.
+    expect(r.failures[0].message).toBe(message);
+  });
+
+  it('R3-960 — the cut never splits a surrogate pair (an astral character straddling the bound)', async () => {
+    // 298 ASCII + one astral char puts its high surrogate exactly at the cut; the
+    // whole character goes, never a lone half.
+    const message = `${'x'.repeat(298)}\u{1F600}${'y'.repeat(50)}`;
+    const r = await runTools(
+      'changed',
+      ports(FILES, { typecheckError: Object.assign(new Error(message), { code: 'service-error' }) }, { changed: ['src/use.ts'] }),
+    );
+    const shown = (r.partial[0] as { detail: string }).detail.split(': ', 2)[1];
+    expect(shown.endsWith('…')).toBe(true);
+    // No lone surrogate anywhere in the rendered line.
+    expect(shown).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+    expect([...shown].length).toBeLessThanOrEqual(MAX_FAILURE_TEXT);
+  });
+
+  it('R3-960 — a failing lint gets the same treatment', async () => {
+    const r = await runTools(
+      'changed',
+      ports(FILES, { lintError: Object.assign(new Error('plugin exploded'), { code: 'service-error' }) }, { changed: ['src/use.ts'] }),
+    );
+    expect(r.failures).toEqual([{ source: 'eslint', code: 'service-error', message: 'plugin exploded' }]);
+    expect(r.partial).toEqual([expect.objectContaining({ kind: 'service-error', detail: 'lint did not run (service-error): plugin exploded' })]);
+    // The other service still ran; its (empty) result set landed.
+    expect(r.diagnostics).toEqual([]);
   });
 
   it('with no files at all (an empty project) it calls nothing and reports the fallback', async () => {
